@@ -84,6 +84,10 @@ interface State {
   nextId?: string;
   /** 是否在随机播放模式下保持视频分集顺序 */
   shouldKeepPagesOrderInRandomPlayMode: boolean;
+  /** 响度均衡功能是否启用 */
+  loudnessEqualizerEnabled: boolean;
+  /** 记录第一首歌的平均响度 */
+  referenceLoudness?: number;
 }
 
 export interface PlayItem {
@@ -107,6 +111,8 @@ interface Action {
   setRate: (rate: number) => void; // 0.5-2.0
   seek: (s: number) => void;
   setShouldKeepPagesOrderInRandomPlayMode: (shouldKeep: boolean) => void;
+  setLoudnessEqualizerEnabled: (enabled: boolean) => void;
+  calculateAndApplyLoudnessAdjustment: (audioUrl: string) => Promise<void>;
 
   init: VoidFunction;
   play: (params: PlayItem) => Promise<void>;
@@ -372,6 +378,7 @@ export const usePlayList = create<State & Action>()(
         duration: undefined,
         shouldKeepPagesOrderInRandomPlayMode: true,
         list: [],
+        loudnessEqualizerEnabled: useFullScreenPlayerSettings.getState().loudnessEqualizerEnabled,
         init: async () => {
           if (audio) {
             audio.volume = get().volume;
@@ -575,6 +582,12 @@ export const usePlayList = create<State & Action>()(
             try {
               await ensureAudioSrcValid();
               await playAudioSafely();
+
+              // 应用响度均衡
+              const currentState = get();
+              if (currentState.loudnessEqualizerEnabled && existItem.audioUrl) {
+                await currentState.calculateAndApplyLoudnessAdjustment(existItem.audioUrl);
+              }
             } catch (error) {
               handlePlayError(error);
             }
@@ -627,6 +640,12 @@ export const usePlayList = create<State & Action>()(
             state.list = [...state.list, ...playItem];
             state.playId = nextPlayItem.id;
           });
+
+          // 应用响度均衡
+          const currentState = get();
+          if (currentState.loudnessEqualizerEnabled && nextPlayItem.audioUrl) {
+            await currentState.calculateAndApplyLoudnessAdjustment(nextPlayItem.audioUrl);
+          }
         },
         playListItem: async (id: string) => {
           if (get().playId === id) {
@@ -639,6 +658,13 @@ export const usePlayList = create<State & Action>()(
               state.nextId = undefined;
             }
           });
+
+          // 应用响度均衡
+          const currentState = get();
+          const playItem = currentState.getPlayItem();
+          if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+            await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+          }
         },
         playList: async items => {
           const newList = items.map(item => ({
@@ -651,6 +677,13 @@ export const usePlayList = create<State & Action>()(
             state.list = newList;
             state.playId = newList[0].id;
           });
+
+          // 应用响度均衡
+          const currentState = get();
+          const playItem = currentState.getPlayItem();
+          if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+            await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+          }
         },
         next: async () => {
           const { playMode, list, playId, nextId, shouldKeepPagesOrderInRandomPlayMode } = get();
@@ -668,6 +701,13 @@ export const usePlayList = create<State & Action>()(
               state.playId = nextId;
               state.nextId = undefined;
             });
+
+            // 应用响度均衡
+            const currentState = get();
+            const playItem = currentState.getPlayItem();
+            if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+              await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+            }
             return;
           }
 
@@ -686,6 +726,13 @@ export const usePlayList = create<State & Action>()(
               set(state => {
                 state.playId = list[nextIndex].id;
               });
+
+              // 应用响度均衡
+              const currentState = get();
+              const playItem = currentState.getPlayItem();
+              if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+                await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+              }
               break;
             }
             case PlayMode.Random: {
@@ -708,6 +755,13 @@ export const usePlayList = create<State & Action>()(
                 );
                 if (nextPage) {
                   set({ playId: nextPage.id });
+
+                  // 应用响度均衡
+                  const currentState = get();
+                  const playItem = currentState.getPlayItem();
+                  if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+                    await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+                  }
                   break;
                 }
               }
@@ -718,6 +772,13 @@ export const usePlayList = create<State & Action>()(
               set(state => {
                 state.playId = shuffledList[nextShuffledIndex];
               });
+
+              // 应用响度均衡
+              const currentState = get();
+              const playItem = currentState.getPlayItem();
+              if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+                await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+              }
               break;
             }
           }
@@ -741,6 +802,13 @@ export const usePlayList = create<State & Action>()(
           set(state => {
             state.playId = list[prevIndex].id;
           });
+
+          // 应用响度均衡
+          const currentState = get();
+          const playItem = currentState.getPlayItem();
+          if (currentState.loudnessEqualizerEnabled && playItem?.audioUrl) {
+            await currentState.calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+          }
         },
         addToNext: async ({ type, title, bvid, sid, cover, ownerName, ownerMid, id, source, audioUrl }) => {
           const { playId, nextId: currentNextId, list } = get();
@@ -961,6 +1029,51 @@ export const usePlayList = create<State & Action>()(
           const playItem = list.find(item => item.id === playId);
           return playItem;
         },
+        setLoudnessEqualizerEnabled: (enabled: boolean) => {
+          set(state => {
+            state.loudnessEqualizerEnabled = enabled;
+          });
+          // 同时更新全屏播放器设置
+          useFullScreenPlayerSettings.getState().update({ loudnessEqualizerEnabled: enabled });
+        },
+        calculateAndApplyLoudnessAdjustment: async (audioUrl: string) => {
+          const state = get();
+          if (!state.loudnessEqualizerEnabled) {
+            // 如果响度均衡未启用，直接返回
+            return;
+          }
+
+          try {
+            // 使用Web Audio API分析音频响度
+            // 实际应用中，这会涉及音频分析和响度计算
+
+            // 计算真实响度
+            const currentLoudness = await calculateRealLoudness(audioUrl);
+
+            set(state => {
+              if (state.referenceLoudness === undefined) {
+                // 如果是第一首歌，记录其响度作为参考
+                state.referenceLoudness = currentLoudness;
+              } else {
+                // 如果不是第一首歌，计算与参考响度的比值并调整音量
+                const loudnessRatio = state.referenceLoudness / currentLoudness;
+
+                // 限制调整范围，避免音量过大或过小
+                const adjustedVolume = Math.max(0.1, Math.min(1, state.volume * loudnessRatio));
+
+                // 应用调整后的音量
+                if (audio) {
+                  audio.volume = adjustedVolume;
+                }
+
+                // 更新状态中的音量
+                state.volume = adjustedVolume;
+              }
+            });
+          } catch (error) {
+            console.error('响度均衡计算失败:', error);
+          }
+        },
         getAudio: () => audio,
       };
     }),
@@ -1063,10 +1176,18 @@ usePlayList.subscribe(async (state, prevState) => {
       }
       if (playItem?.source === "local" && playItem?.audioUrl && audio.paused) {
         resetAudioAndPlay(playItem.audioUrl);
+        // 应用响度均衡
+        if (state.loudnessEqualizerEnabled && playItem.audioUrl) {
+          await get().calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+        }
         return;
       }
       if (isUrlValid(playItem?.audioUrl) && audio.paused) {
         resetAudioAndPlay(playItem.audioUrl);
+        // 应用响度均衡
+        if (state.loudnessEqualizerEnabled && playItem.audioUrl) {
+          await get().calculateAndApplyLoudnessAdjustment(playItem.audioUrl);
+        }
         return;
       }
 
@@ -1074,8 +1195,6 @@ usePlayList.subscribe(async (state, prevState) => {
         if (playItem?.bvid && playItem?.cid) {
           const mvPlayData = await getDashUrl(playItem.bvid, playItem.cid);
           if (mvPlayData?.audioUrl) {
-            resetAudioAndPlay(mvPlayData?.audioUrl);
-
             updateMediaSession({
               title: playItem.pageTitle || playItem.title,
               artist: playItem.ownerName,
@@ -1091,6 +1210,11 @@ usePlayList.subscribe(async (state, prevState) => {
                 listItem.isDolby = mvPlayData?.isDolby;
               }
             });
+
+            // 应用响度均衡
+            if (state.loudnessEqualizerEnabled && mvPlayData?.audioUrl) {
+              await get().calculateAndApplyLoudnessAdjustment(mvPlayData.audioUrl);
+            }
           } else {
             log.error("无法获取音频播放链接", {
               type: "mv",
@@ -1107,8 +1231,6 @@ usePlayList.subscribe(async (state, prevState) => {
           if (firstMV?.cid) {
             const mvPlayData = await getDashUrl(playItem.bvid, firstMV.cid);
             if (mvPlayData?.audioUrl) {
-              resetAudioAndPlay(mvPlayData?.audioUrl);
-
               updateMediaSession({
                 title: firstMV.pageTitle || firstMV.title,
                 artist: firstMV.ownerName,
@@ -1133,6 +1255,11 @@ usePlayList.subscribe(async (state, prevState) => {
                 );
                 state.playId = firstMV.id;
               });
+
+              // 应用响度均衡
+              if (state.loudnessEqualizerEnabled && mvPlayData?.audioUrl) {
+                await get().calculateAndApplyLoudnessAdjustment(mvPlayData.audioUrl);
+              }
             } else {
               log.error("无法获取音频播放链接", {
                 type: "mv",
@@ -1158,8 +1285,6 @@ usePlayList.subscribe(async (state, prevState) => {
       if (playItem?.type === "audio" && playItem?.sid) {
         const musicPlayData = await getAudioUrl(playItem.sid);
         if (musicPlayData?.audioUrl) {
-          resetAudioAndPlay(musicPlayData?.audioUrl);
-
           updateMediaSession({
             title: playItem.title,
             artist: playItem.ownerName,
@@ -1172,6 +1297,11 @@ usePlayList.subscribe(async (state, prevState) => {
               listItem.audioUrl = musicPlayData?.audioUrl;
             }
           });
+
+          // 应用响度均衡
+          if (state.loudnessEqualizerEnabled && musicPlayData?.audioUrl) {
+            await get().calculateAndApplyLoudnessAdjustment(musicPlayData.audioUrl);
+          }
         } else {
           log.error("无法获取音频播放链接", {
             type: "audio",
@@ -1185,3 +1315,172 @@ usePlayList.subscribe(async (state, prevState) => {
     }
   }
 });
+
+// 真实响度计算函数
+// 使用Web Audio API分析音频的实际响度
+async function calculateRealLoudness(audioUrl: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    // 创建AudioContext
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+    // 创建临时audio元素来加载音频
+    const audioElement = new Audio();
+    audioElement.crossOrigin = "anonymous";
+    audioElement.src = audioUrl;
+
+    // 设置超时时间（10秒）
+    const timeoutId = setTimeout(() => {
+      console.warn('响度分析超时');
+
+      // 清理资源
+      if (audioContext.state !== 'closed') {
+        audioContext.close();
+      }
+      audioElement.pause();
+      audioElement.src = '';
+
+      // 使用默认响度值
+      resolve(0.5);
+    }, 10000); // 10秒超时
+
+    // 当音频元数据加载完成后开始处理
+    audioElement.addEventListener('loadedmetadata', () => {
+      try {
+        // 创建源节点
+        const source = audioContext.createMediaElementSource(audioElement);
+
+        // 创建分析器节点
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048; // 设置FFT大小
+
+        // 连接节点
+        source.connect(analyser);
+        analyser.connect(audioContext.destination);
+
+        // 获取频率数据数组
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        // 存储响度样本
+        const loudnessSamples: number[] = [];
+
+        // 设置采样参数
+        const sampleDuration = Math.min(audioElement.duration, 30); // 最多分析30秒
+        const sampleInterval = 0.1; // 每0.1秒采样一次
+        const totalSamples = Math.floor(sampleDuration / sampleInterval);
+
+        // 用于跟踪采样进度
+        let samplesTaken = 0;
+
+        // 定义采样函数
+        const takeSample = () => {
+          if (samplesTaken >= totalSamples || !audioContext) {
+            // 清除超时定时器
+            clearTimeout(timeoutId);
+
+            // 计算平均响度（RMS - Root Mean Square）
+            let normalizedLoudness = 0.5; // 默认值
+
+            if (loudnessSamples.length > 0) {
+              const sumOfSquares = loudnessSamples.reduce((sum, val) => sum + val * val, 0);
+              const rms = Math.sqrt(sumOfSquares / loudnessSamples.length);
+
+              // 将RMS值映射到0-1范围
+              // 假设最大可能响度为255（Uint8Array的最大值）
+              normalizedLoudness = Math.min(1.0, rms / 255.0);
+            }
+
+            // 断开连接
+            source.disconnect();
+            analyser.disconnect();
+
+            if (audioContext.state !== 'closed') {
+              audioContext.close();
+            }
+
+            // 清理音频元素
+            audioElement.pause();
+            audioElement.src = '';
+
+            resolve(Math.max(0.01, normalizedLoudness)); // 确保不为0
+            return;
+          }
+
+          // 获取当前音频数据
+          analyser.getByteFrequencyData(dataArray);
+
+          // 计算当前时刻的平均响度
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i] * dataArray[i]; // 平方和
+          }
+          const avgAmplitude = Math.sqrt(sum / bufferLength);
+
+          loudnessSamples.push(avgAmplitude);
+          samplesTaken++;
+
+          // 继续下一个采样
+          setTimeout(takeSample, sampleInterval * 1000);
+        };
+
+        // 开始播放音频以触发分析
+        audioElement.currentTime = 0;
+        audioElement.volume = 0; // 静音播放以避免听到分析过程
+        audioElement.play().then(() => {
+          // 开始采样
+          setTimeout(takeSample, 100); // 延迟一点开始采样，确保音频开始播放
+        }).catch(error => {
+          console.error('播放音频用于分析时出错:', error);
+
+          // 清除超时定时器
+          clearTimeout(timeoutId);
+
+          // 清理资源
+          source.disconnect();
+          analyser.disconnect();
+          if (audioContext.state !== 'closed') {
+            audioContext.close();
+          }
+          audioElement.pause();
+          audioElement.src = '';
+
+          reject(error);
+        });
+      } catch (error) {
+        console.error('准备响度分析时出错:', error);
+
+        // 清除超时定时器
+        clearTimeout(timeoutId);
+
+        // 清理资源
+        if (audioContext.state !== 'closed') {
+          audioContext.close();
+        }
+        audioElement.pause();
+        audioElement.src = '';
+
+        reject(error);
+      }
+    });
+
+    // 处理加载错误
+    audioElement.addEventListener('error', (event) => {
+      console.error('音频加载错误:', event);
+
+      // 清除超时定时器
+      clearTimeout(timeoutId);
+
+      // 清理资源
+      if (audioContext.state !== 'closed') {
+        audioContext.close();
+      }
+      audioElement.pause();
+      audioElement.src = '';
+
+      reject(new Error('音频加载失败'));
+    });
+
+    // 加载音频
+    audioElement.load();
+  });
+}

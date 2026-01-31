@@ -38,4 +38,6 @@ interface AppSettings {
   reportPlayHistory: boolean;
   /** 本地音乐目录列表 */
   localMusicDirs: string[];
+  /** 响度均衡开关（实验性） */
+  loudnessEqualizerEnabled?: boolean;
 }

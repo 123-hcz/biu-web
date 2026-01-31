@@ -10,6 +10,7 @@ export interface FullScreenPlayerSettingsState {
   backgroundColor?: string;
   spectrumColor?: string;
   lyricsColor?: string;
+  loudnessEqualizerEnabled: boolean;
 }
 
 interface Actions {
@@ -26,6 +27,7 @@ const defaultSettings: FullScreenPlayerSettingsState = {
   backgroundColor: undefined,
   spectrumColor: "currentColor",
   lyricsColor: "#ffffff",
+  loudnessEqualizerEnabled: true,
 };
 
 export const useFullScreenPlayerSettings = create<FullScreenPlayerSettingsState & Actions>()(
@@ -46,6 +48,7 @@ export const useFullScreenPlayerSettings = create<FullScreenPlayerSettingsState 
         backgroundColor: state.backgroundColor,
         spectrumColor: state.spectrumColor,
         lyricsColor: state.lyricsColor,
+        loudnessEqualizerEnabled: state.loudnessEqualizerEnabled,
       }),
     },
   ),

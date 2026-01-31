@@ -27,6 +27,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
     backgroundColor,
     spectrumColor,
     lyricsColor,
+    loudnessEqualizerEnabled,
     update,
   } = useFullScreenPlayerSettings(
     useShallow(s => ({
@@ -38,6 +39,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
       backgroundColor: s.backgroundColor,
       spectrumColor: s.spectrumColor,
       lyricsColor: s.lyricsColor,
+      loudnessEqualizerEnabled: s.loudnessEqualizerEnabled,
       update: s.update,
     })),
   );
@@ -52,6 +54,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
       backgroundColor,
       spectrumColor,
       lyricsColor,
+      loudnessEqualizerEnabled,
     },
     mode: "onChange",
   });
@@ -77,6 +80,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
     setValue("backgroundColor", backgroundColor);
     setValue("spectrumColor", spectrumColor);
     setValue("lyricsColor", lyricsColor);
+    setValue("loudnessEqualizerEnabled", loudnessEqualizerEnabled);
   }, [
     setValue,
     showLyrics,
@@ -87,6 +91,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
     backgroundColor,
     spectrumColor,
     lyricsColor,
+    loudnessEqualizerEnabled,
   ]);
 
   const values = useWatch({ control });
@@ -99,6 +104,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
       showSpectrum: values.showSpectrum,
       showCover: values.showCover,
       showBlurredBackground: values.showBlurredBackground,
+      loudnessEqualizerEnabled: values.loudnessEqualizerEnabled,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -107,6 +113,7 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
     values?.showSpectrum,
     values?.showCover,
     values?.showBlurredBackground,
+    values?.loudnessEqualizerEnabled,
     update,
   ]);
 
@@ -172,6 +179,15 @@ const FullScreenPlayerSettingsPanel = ({ isUiVisible = true }: { isUiVisible?: b
           </div>
         </>
       )}
+
+      <div className="flex items-center justify-between">
+        <div className="text-medium mr-6">响度均衡 <span className="text-xs text-gray-500">(实验性)</span></div>
+        <Controller
+          control={control}
+          name="loudnessEqualizerEnabled"
+          render={({ field }) => <Switch isSelected={field.value} onValueChange={field.onChange} />}
+        />
+      </div>
 
       <div className="flex items-center justify-between">
         <div className="text-medium mr-6">显示频谱图</div>

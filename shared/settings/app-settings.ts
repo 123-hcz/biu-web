@@ -28,4 +28,5 @@ export const defaultAppSettings: AppSettings = {
   },
   reportPlayHistory: true,
   localMusicDirs: [],
+  loudnessEqualizerEnabled: true,
 };
