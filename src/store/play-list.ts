@@ -378,7 +378,14 @@ export const usePlayList = create<State & Action>()(
         duration: undefined,
         shouldKeepPagesOrderInRandomPlayMode: true,
         list: [],
-        loudnessEqualizerEnabled: useFullScreenPlayerSettings.getState().loudnessEqualizerEnabled,
+        loudnessEqualizerEnabled: (() => {
+          try {
+            return useFullScreenPlayerSettings.getState().loudnessEqualizerEnabled;
+          } catch (error) {
+            console.warn('无法获取全屏播放器设置，使用默认值:', error);
+            return true; // 默认开启响度均衡
+          }
+        })(),
         init: async () => {
           if (audio) {
             audio.volume = get().volume;
@@ -1050,6 +1057,7 @@ export const usePlayList = create<State & Action>()(
             // 计算真实响度
             const currentLoudness = await calculateRealLoudness(audioUrl);
 
+            // 使用immer来安全地更新状态
             set(state => {
               if (state.referenceLoudness === undefined) {
                 // 如果是第一首歌，记录其响度作为参考
@@ -1072,6 +1080,8 @@ export const usePlayList = create<State & Action>()(
             });
           } catch (error) {
             console.error('响度均衡计算失败:', error);
+            // 发生错误时，确保功能不会影响播放
+            // 不抛出错误，让播放继续进行
           }
         },
         getAudio: () => audio,
@@ -1402,6 +1412,7 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
 
         // 定义采样函数
         const takeSample = () => {
+          // 检查是否应该继续采样
           if (samplesTaken >= totalSamples || !audioContext) {
             // 清除超时定时器
             clearTimeout(timeoutId);
@@ -1439,6 +1450,7 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
           samplesTaken++;
 
           // 继续下一个采样
+          // 使用 setTimeout 来避免阻塞主线程，同时保持采样间隔
           setTimeout(takeSample, sampleInterval * 1000);
         };
 
