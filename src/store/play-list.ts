@@ -1319,9 +1319,16 @@ usePlayList.subscribe(async (state, prevState) => {
 // 真实响度计算函数
 // 使用Web Audio API分析音频的实际响度
 async function calculateRealLoudness(audioUrl: string): Promise<number> {
+  // 检查浏览器是否支持Web Audio API
+  if (!(window.AudioContext || (window as any).webkitAudioContext)) {
+    console.warn('浏览器不支持Web Audio API，使用默认响度值');
+    return 0.5;
+  }
+
   return new Promise((resolve, reject) => {
-    // 创建AudioContext
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    let audioContext: AudioContext | null = null;
+    let source: MediaElementAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
 
     // 创建临时audio元素来加载音频
     const audioElement = new Audio();
@@ -1333,24 +1340,45 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
       console.warn('响度分析超时');
 
       // 清理资源
-      if (audioContext.state !== 'closed') {
-        audioContext.close();
-      }
-      audioElement.pause();
-      audioElement.src = '';
+      cleanup();
 
       // 使用默认响度值
       resolve(0.5);
     }, 10000); // 10秒超时
 
-    // 当音频元数据加载完成后开始处理
-    audioElement.addEventListener('loadedmetadata', () => {
+    // 清理函数
+    const cleanup = () => {
       try {
+        if (source) {
+          source.disconnect();
+        }
+        if (analyser) {
+          analyser.disconnect();
+        }
+        if (audioContext && audioContext.state !== 'closed') {
+          audioContext.close();
+        }
+        if (audioElement) {
+          audioElement.pause();
+          audioElement.src = '';
+          audioElement.load(); // 确保完全停止加载
+        }
+      } catch (e) {
+        console.warn('清理资源时出现错误:', e);
+      }
+    };
+
+    // 当音频元数据加载完成后开始处理
+    audioElement.addEventListener('loadedmetadata', async () => {
+      try {
+        // 创建AudioContext
+        audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
         // 创建源节点
-        const source = audioContext.createMediaElementSource(audioElement);
+        source = audioContext.createMediaElementSource(audioElement);
 
         // 创建分析器节点
-        const analyser = audioContext.createAnalyser();
+        analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048; // 设置FFT大小
 
         // 连接节点
@@ -1390,24 +1418,15 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
               normalizedLoudness = Math.min(1.0, rms / 255.0);
             }
 
-            // 断开连接
-            source.disconnect();
-            analyser.disconnect();
-
-            if (audioContext.state !== 'closed') {
-              audioContext.close();
-            }
-
-            // 清理音频元素
-            audioElement.pause();
-            audioElement.src = '';
+            // 清理资源
+            cleanup();
 
             resolve(Math.max(0.01, normalizedLoudness)); // 确保不为0
             return;
           }
 
           // 获取当前音频数据
-          analyser.getByteFrequencyData(dataArray);
+          analyser!.getByteFrequencyData(dataArray);
 
           // 计算当前时刻的平均响度
           let sum = 0;
@@ -1426,26 +1445,21 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
         // 开始播放音频以触发分析
         audioElement.currentTime = 0;
         audioElement.volume = 0; // 静音播放以避免听到分析过程
-        audioElement.play().then(() => {
+        try {
+          await audioElement.play();
           // 开始采样
           setTimeout(takeSample, 100); // 延迟一点开始采样，确保音频开始播放
-        }).catch(error => {
+        } catch (error) {
           console.error('播放音频用于分析时出错:', error);
 
           // 清除超时定时器
           clearTimeout(timeoutId);
 
           // 清理资源
-          source.disconnect();
-          analyser.disconnect();
-          if (audioContext.state !== 'closed') {
-            audioContext.close();
-          }
-          audioElement.pause();
-          audioElement.src = '';
+          cleanup();
 
           reject(error);
-        });
+        }
       } catch (error) {
         console.error('准备响度分析时出错:', error);
 
@@ -1453,11 +1467,7 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
         clearTimeout(timeoutId);
 
         // 清理资源
-        if (audioContext.state !== 'closed') {
-          audioContext.close();
-        }
-        audioElement.pause();
-        audioElement.src = '';
+        cleanup();
 
         reject(error);
       }
@@ -1471,11 +1481,7 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
       clearTimeout(timeoutId);
 
       // 清理资源
-      if (audioContext.state !== 'closed') {
-        audioContext.close();
-      }
-      audioElement.pause();
-      audioElement.src = '';
+      cleanup();
 
       reject(new Error('音频加载失败'));
     });
