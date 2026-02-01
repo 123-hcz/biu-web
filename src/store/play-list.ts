@@ -1403,7 +1403,12 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
         const loudnessSamples: number[] = [];
 
         // 设置采样参数
-        const sampleDuration = Math.min(audioElement.duration, 30); // 最多分析30秒
+        let sampleDuration = audioElement.duration;
+        // 确保 duration 是有效数值
+        if (!isFinite(sampleDuration) || sampleDuration <= 0) {
+          sampleDuration = 5; // 默认分析5秒
+        }
+        sampleDuration = Math.min(sampleDuration, 30); // 最多分析30秒
         const sampleInterval = 0.1; // 每0.1秒采样一次
         const totalSamples = Math.floor(sampleDuration / sampleInterval);
 
@@ -1436,6 +1441,26 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
             return;
           }
 
+          // 检查音频是否仍在播放，如果没有则提前结束
+          if (audioElement.paused) {
+            // 清除超时定时器
+            clearTimeout(timeoutId);
+
+            // 计算已收集样本的平均响度
+            let normalizedLoudness = 0.5; // 默认值
+            if (loudnessSamples.length > 0) {
+              const sumOfSquares = loudnessSamples.reduce((sum, val) => sum + val * val, 0);
+              const rms = Math.sqrt(sumOfSquares / loudnessSamples.length);
+              normalizedLoudness = Math.min(1.0, rms / 255.0);
+            }
+
+            // 清理资源
+            cleanup();
+
+            resolve(Math.max(0.01, normalizedLoudness)); // 确保不为0
+            return;
+          }
+
           // 获取当前音频数据
           analyser!.getByteFrequencyData(dataArray);
 
@@ -1450,17 +1475,53 @@ async function calculateRealLoudness(audioUrl: string): Promise<number> {
           samplesTaken++;
 
           // 继续下一个采样
-          // 使用 setTimeout 来避免阻塞主线程，同时保持采样间隔
           setTimeout(takeSample, sampleInterval * 1000);
         };
 
         // 开始播放音频以触发分析
         audioElement.currentTime = 0;
         audioElement.volume = 0; // 静音播放以避免听到分析过程
+
+        // 设置一个检查标志，防止无限循环
+        let hasStartedSampling = false;
+
         try {
           await audioElement.play();
           // 开始采样
+          hasStartedSampling = true;
           setTimeout(takeSample, 100); // 延迟一点开始采样，确保音频开始播放
+
+          // 监听音频结束事件，以防音频提前结束
+          audioElement.addEventListener('ended', () => {
+            if (!hasStartedSampling) return;
+            // 音频提前结束，终止采样
+            clearTimeout(timeoutId);
+            cleanup();
+            // 使用当前收集到的数据计算响度，如果没有数据则使用默认值
+            let normalizedLoudness = 0.5;
+            if (loudnessSamples.length > 0) {
+              const sumOfSquares = loudnessSamples.reduce((sum, val) => sum + val * val, 0);
+              const rms = Math.sqrt(sumOfSquares / loudnessSamples.length);
+              normalizedLoudness = Math.min(1.0, rms / 255.0);
+            }
+            resolve(Math.max(0.01, normalizedLoudness));
+          }, { once: true });
+
+          // 监听暂停事件，当音频暂停时立即停止分析
+          audioElement.addEventListener('pause', () => {
+            if (!hasStartedSampling) return;
+            // 音频被暂停，终止采样
+            clearTimeout(timeoutId);
+            cleanup();
+            // 使用当前收集到的数据计算响度，如果没有数据则使用默认值
+            let normalizedLoudness = 0.5;
+            if (loudnessSamples.length > 0) {
+              const sumOfSquares = loudnessSamples.reduce((sum, val) => sum + val * val, 0);
+              const rms = Math.sqrt(sumOfSquares / loudnessSamples.length);
+              normalizedLoudness = Math.min(1.0, rms / 255.0);
+            }
+            resolve(Math.max(0.01, normalizedLoudness));
+          }, { once: true });
         } catch (error) {
           console.error('播放音频用于分析时出错:', error);
 
